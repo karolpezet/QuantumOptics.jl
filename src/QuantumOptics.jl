@@ -12,11 +12,11 @@ export bases, Basis, GenericBasis, CompositeBasis, basis,
         operators_lazysum, LazySum,
         operators_lazyproduct, LazyProduct,
         operators_lazytensor, LazyTensor,
-        randstate, randoperator,
         superoperators, SuperOperator, DenseSuperOperator, SparseSuperOperator,
                 spre, spost, liouvillian,
         fock, FockBasis, number, destroy, create,
                 fockstate, coherentstate, displace,
+        randstate, randoperator, thermalstate, coherentthermalstate, phase_average, passive_state,
         spin, SpinBasis, sigmax, sigmay, sigmaz, sigmap, sigmam, spinup, spindown,
         subspace, SubspaceBasis, projector,
         particle, PositionBasis, MomentumBasis, samplepoints, gaussianstate,
@@ -24,7 +24,7 @@ export bases, Basis, GenericBasis, CompositeBasis, basis,
         nlevel, NLevelBasis, transition, nlevelstate,
         manybody, ManyBodyBasis, fermionstates, bosonstates,
                 manybodyoperator, onebodyexpect, occupation,
-        phasespace, qfunc, wigner,
+        phasespace, qfunc, wigner, coherentspinstate,
         metrics, tracenorm, tracenorm_h, tracenorm_nh,
                 tracedistance, tracedistance_h, tracedistance_nh,
                 entropy_vn, fidelity, ptranspose, PPT,
@@ -48,10 +48,10 @@ include("operators_sparse.jl")
 include("operators_lazysum.jl")
 include("operators_lazyproduct.jl")
 include("operators_lazytensor.jl")
-include("random.jl")
 include("superoperators.jl")
 include("spin.jl")
 include("fock.jl")
+include("state_definitions.jl")
 include("subspace.jl")
 include("particle.jl")
 include("nlevel.jl")
@@ -74,10 +74,12 @@ include("timecorrelations.jl")
 include("spectralanalysis.jl")
 include("semiclassical.jl")
 module stochastic
+    include("stochastic_definitions.jl")
     include("stochastic_schroedinger.jl")
     include("stochastic_master.jl")
     include("stochastic_semiclassical.jl")
     using .stochastic_schroedinger, .stochastic_master, .stochastic_semiclassical
+    using .stochastic_definitions
 end
 include("printing.jl")
 
@@ -89,10 +91,10 @@ using .operators_sparse
 using .operators_lazysum
 using .operators_lazyproduct
 using .operators_lazytensor
-using .random
 using .superoperators
 using .spin
 using .fock
+using .state_definitions
 using .subspace
 using .particle
 using .nlevel

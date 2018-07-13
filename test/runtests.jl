@@ -19,6 +19,7 @@ names = [
     "test_manybody.jl",
     "test_nlevel.jl",
     "test_subspace.jl",
+    "test_state_definitions.jl",
 
     "test_phasespace.jl",
     "test_transformations.jl",
@@ -40,6 +41,7 @@ names = [
 
     "test_semiclassical.jl",
 
+    "test_stochastic_definitions.jl",
     "test_stochastic_schroedinger.jl",
     "test_stochastic_master.jl",
     "test_stochastic_semiclassical.jl",
