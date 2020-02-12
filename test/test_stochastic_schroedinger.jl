@@ -1,5 +1,7 @@
-using Base.Test
+using Test
 using QuantumOptics
+using LinearAlgebra
+import StochasticDiffEq
 
 @testset "stochastic_schroedinger" begin
 

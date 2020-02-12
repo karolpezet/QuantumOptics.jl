@@ -1,13 +1,14 @@
-using ..metrics
+using QuantumOpticsBase
+using QuantumOpticsBase: check_samebases, check_multiplicable
 
-import OrdinaryDiffEq, DiffEqCallbacks, StochasticDiffEq
+import OrdinaryDiffEq, DiffEqCallbacks
 
-const DiffArray = Union{Vector{Complex128}, Array{Complex128, 2}}
+const DiffArray = Union{Vector{ComplexF64}, Array{ComplexF64, 2}}
 
 function recast! end
 
 """
-    integrate(tspan::Vector{Float64}, df::Function, x0::Vector{Complex128},
+    integrate(tspan::Vector{Float64}, df::Function, x0::Vector{ComplexF64},
             state::T, dstate::T, fout::Function; kwargs...)
 
 Integrate using OrdinaryDiffEq
@@ -67,7 +68,7 @@ function integrate(tspan::Vector{Float64}, df::Function, x0::DiffArray,
 end
 
 function integrate(tspan::Vector{Float64}, df::Function, x0::DiffArray,
-            state::T, dstate::T, ::Void; kwargs...) where T
+            state::T, dstate::T, ::Nothing; kwargs...) where T
     function fout(t::Float64, state::T)
         copy(state)
     end
@@ -82,97 +83,26 @@ end
 function (c::SteadyStateCondtion)(rho,t,integrator)
     timeevolution.recast!(rho,c.state)
     dt = integrator.dt
-    drho = metrics.tracedistance(c.rho0, c.state)
+    drho = tracedistance(c.rho0, c.state)
     c.rho0.data[:] = c.state.data
     drho/dt < c.tol
 end
 
 
-
+const QO_CHECKS = Ref(true)
 """
-    integrate_stoch(tspan::Vector{Float64}, df::Function, dg::Vector{Function}, x0::Vector{Complex128},
-            state::T, dstate::T, fout::Function; kwargs...)
+    @skiptimechecks
 
-Integrate using StochasticDiffEq
+Macro to skip checks during time-dependent problems.
+Useful for `timeevolution.master_dynamic` and similar functions.
 """
-function integrate_stoch(tspan::Vector{Float64}, df::Function, dg::Function, x0::Vector{Complex128},
-            state::T, dstate::T, fout::Function, n::Int;
-            save_everystep = false, callback=nothing,
-            alg::StochasticDiffEq.StochasticDiffEqAlgorithm=StochasticDiffEq.EM(),
-            noise_rate_prototype = nothing,
-            noise_prototype_classical = nothing,
-            noise=nothing,
-            ncb=nothing,
-            kwargs...) where T
-
-    function df_(dx::Vector{Complex128}, x::Vector{Complex128}, p, t)
-        recast!(x, state)
-        recast!(dx, dstate)
-        df(t, state, dstate)
-        recast!(dstate, dx)
+macro skiptimechecks(ex)
+    return quote
+        QO_CHECKS.x = false
+        local val = $(esc(ex))
+        QO_CHECKS.x = true
+        val
     end
-
-    function dg_(dx::Union{Vector{Complex128}, Array{Complex128, 2}},
-                x::Vector{Complex128}, p, t)
-        recast!(x, state)
-        dg(dx, t, state, dstate, n)
-    end
-
-    function fout_(x::Vector{Complex128}, t::Float64, integrator)
-        recast!(x, state)
-        fout(t, state)
-    end
-
-    nc = isa(noise_prototype_classical, Void) ? 0 : size(noise_prototype_classical)[2]
-    if isa(noise, Void) && n > 0
-        noise_ = StochasticDiffEq.RealWienerProcess!(0.0, randn(n + nc))
-    else
-        noise_ = noise
-    end
-    if isa(noise_rate_prototype, Void)
-        if n > 1 || nc > 1 || (n > 0 && nc > 0)
-            noise_rate_prototype = zeros(Complex128, length(x0), n + nc)
-        end
-    end
-
-    out_type = pure_inference(fout, Tuple{eltype(tspan),typeof(state)})
-
-    out = DiffEqCallbacks.SavedValues(Float64,out_type)
-
-    scb = DiffEqCallbacks.SavingCallback(fout_,out,saveat=tspan,
-                                         save_everystep=save_everystep,
-                                         save_start = false)
-
-    full_cb = OrdinaryDiffEq.CallbackSet(callback, ncb, scb)
-
-    prob = StochasticDiffEq.SDEProblem{true}(df_, dg_, x0,(tspan[1],tspan[end]),
-                    noise=noise_,
-                    noise_rate_prototype=noise_rate_prototype)
-
-    sol = StochasticDiffEq.solve(
-                prob,
-                alg;
-                reltol = 1.0e-3,
-                abstol = 1.0e-3,
-                save_everystep = false, save_start = false,
-                save_end = false,
-                callback=full_cb, kwargs...)
-
-    out.t,out.saveval
 end
 
-"""
-    integrate_stoch
-
-Define fout if it was omitted.
-"""
-function integrate_stoch(tspan::Vector{Float64}, df::Function, dg::Function, x0::Vector{Complex128},
-    state::T, dstate::T, ::Void, n::Int; kwargs...) where T
-    function fout(t::Float64, state::T)
-        copy(state)
-    end
-    integrate_stoch(tspan, df, dg, x0, state, dstate, fout, n; kwargs...)
-end
-
-
-Base.@pure pure_inference(fout,T) = Core.Inference.return_type(fout, T)
+Base.@pure pure_inference(fout,T) = Core.Compiler.return_type(fout, T)

@@ -1,5 +1,6 @@
-using Base.Test
+using Test
 using QuantumOptics
+using Random, LinearAlgebra
 
 @testset "mcwf" begin
 
@@ -29,14 +30,14 @@ Ha = embed(basis, 1, 0.5*ωa*sz)
 Hc = embed(basis, 2, ωc*number(fockbasis))
 Hint = sm ⊗ create(fockbasis) + sp ⊗ destroy(fockbasis)
 H = Ha + Hc + Hint
-Hdense = full(H)
+Hdense = dense(H)
 Hlazy = LazySum(Ha, Hc, Hint)
 
 # Jump operators
 Ja = embed(basis, 1, sqrt(γ)*sm)
 Jc = embed(basis, 2, sqrt(κ)*destroy(fockbasis))
 J = [Ja, Jc]
-Jdense = map(full, J)
+Jdense = map(dense, J)
 Jlazy = [LazyTensor(basis, 1, sqrt(γ)*sm), LazyTensor(basis, 2, sqrt(κ)*destroy(fockbasis))]
 
 # Initial conditions
@@ -93,7 +94,7 @@ tout, Ψt = timeevolution.mcwf_h(T, Ψ₀, H, J; seed=UInt(2), reltol=1e-6)
 
 # Test mcwf nh
 Hnh = H - 0.5im*sum([dagger(J[i])*J[i] for i=1:length(J)])
-Hnh_dense = full(Hnh)
+Hnh_dense = dense(Hnh)
 
 tout, Ψt = timeevolution.mcwf_nh(T, Ψ₀, Hnh, J; seed=UInt(1), reltol=1e-6)
 @test norm(Ψt[end]-Ψ) < 1e-5
@@ -127,9 +128,9 @@ end
 
 # Test single jump operator
 J1 = [Ja]
-J1_dense = map(full, J1)
+J1_dense = map(dense, J1)
 J2 = [Ja, 0 * Jc]
-J2_dense = map(full, J2)
+J2_dense = map(dense, J2)
 
 tout_master, ρt_master = timeevolution.master(T, ρ₀, Hdense, J1_dense)
 
@@ -152,6 +153,13 @@ for i=1:length(T)
     @test tracedistance(ρt_master[i], ρ_average_3[i]) < 0.1
 end
 
+# Test displaying before/after jump
+tout, Ψt = timeevolution.mcwf([T[1],T[end]], Ψ₀, Hdense, J1; seed=2, display_beforeevent=true, display_afterevent=true)
+for i=2:length(tout)-1
+    if tout[i+1] == tout[i]
+        @test Ψt[i+1].data ≈ normalize(J1[1]*Ψt[i]).data
+    end
+end
 
 # Test equivalence to schroedinger time evolution for no decay
 J = DenseOperator[]
@@ -197,7 +205,7 @@ end
 J3_lazy = [LazyTensor(threespinbasis, i, sm) for i=1:3]
 d, diagJ_lazy = diagonaljumps(rates, J3_lazy)
 for i=1:3
-    @test full(diagJ_lazy[i]) == full(diagJ[i])
+    @test dense(diagJ_lazy[i]) == dense(diagJ[i])
 end
 
 # Test dynamic
@@ -248,5 +256,18 @@ for i=1:length(T)
     @test tracedistance(ρt_master[i], ρ_average_4[i]) < 0.1
 end
 
+# Test displaying of jumps
+tout, Ψt, t_jump, j_index = timeevolution.mcwf(T, Ψ₀, Hdense, Jdense; seed=UInt(1), reltol=1e-7, display_jumps=true)
+tout, Ψt, t_jump2, j_index2 = timeevolution.mcwf(T, Ψ₀, Hdense, Jdense; seed=UInt(1), reltol=1e-7, display_jumps=true)
+
+@test length(j_index) == length(t_jump) == length(t_jump2) == length(j_index2)
+@test j_index == j_index2
+@test t_jump == t_jump2
+
+ψ0 = spinup(spinbasis)⊗fockstate(fockbasis,0)
+tout, ψt, t_jump, j_index = timeevolution.mcwf(T, ψ0, 0Hdense, Jdense; display_jumps=true, seed=2)
+
+@test length(t_jump) == length(j_index) == 1
+@test j_index[1] == 1
 
 end # testset

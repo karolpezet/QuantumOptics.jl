@@ -1,5 +1,6 @@
-using Base.Test
+using Test
 using QuantumOptics
+using LinearAlgebra
 
 @testset "master" begin
 
@@ -12,7 +13,7 @@ g = 1.0
 T = Float64[0.,1.]
 
 
-fockbasis = FockBasis(5)
+fockbasis = FockBasis(10)
 spinbasis = SpinBasis(1//2)
 basis = tensor(spinbasis, fockbasis)
 
@@ -38,19 +39,27 @@ Jlazy = [LazyTensor(basis, 1, sqrt(γ)*sm), Jc]
 
 Hnh = H - 0.5im*sum([dagger(J[i])*J[i] for i=1:length(J)])
 
-Hdense = full(H)
+Hdense = dense(H)
 Hlazy = LazySum(Ha, Hc, Hint)
-Hnh_dense = full(Hnh)
-Junscaled_dense = map(full, Junscaled)
-Jdense = map(full, J)
+Hnh_dense = dense(Hnh)
+Junscaled_dense = map(dense, Junscaled)
+Jdense = map(dense, J)
 
 Ψ₀ = spinup(spinbasis) ⊗ fockstate(fockbasis, 5)
 ρ₀ = dm(Ψ₀)
 
+# Test Liouvillian
+L = liouvillian(H, J)
+ρ = -1im*(H*ρ₀ - ρ₀*H)
+for j=J
+    ρ .+= j*ρ₀*dagger(j) - 0.5*dagger(j)*j*ρ₀ - 0.5*ρ₀*dagger(j)*j
+end
+@test tracedistance(L*ρ₀, ρ) < 1e-10
 
 # Test master
 tout, ρt = timeevolution.master(T, ρ₀, Hdense, Jdense; reltol=1e-7)
 ρ = ρt[end]
+@test tracedistance(exp(dense(L)*T[end])*ρ₀, ρt[end]) < 1e-6
 
 tout, ρt = timeevolution.master(T, ρ₀, H, J; reltol=1e-6)
 @test tracedistance(ρt[end], ρ) < 1e-5
@@ -136,7 +145,7 @@ R = [cos(alpha) -sin(alpha); sin(alpha) cos(alpha)]
 Rt = transpose(R)
 Jrotated_dense = [R[1,1]*Junscaled_dense[1] + R[1,2]*Junscaled_dense[2], R[2,1]*Junscaled_dense[1] + R[2,2]*Junscaled_dense[2]]
 Jrotated = [SparseOperator(j) for j=Jrotated_dense]
-rates_matrix = diagm(rates_vector)
+rates_matrix = diagm(0 => rates_vector)
 rates_matrix_rotated = R * rates_matrix * Rt
 
 tout, ρt = timeevolution.master(T, ρ₀, Hdense, Jrotated_dense; rates=rates_matrix_rotated, reltol=1e-7)

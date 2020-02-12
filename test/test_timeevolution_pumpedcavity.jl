@@ -1,4 +1,4 @@
-using Base.Test
+using Test
 using QuantumOptics
 
 @testset "timeevolution_pumpedcavity" begin
@@ -57,7 +57,7 @@ timeevolution.master_dynamic(T, psi0, f_HJ; fout=f_test_td)
 
 # Decay
 Hint_nh = Hint - 0.5im*κ*n
-Γ = Matrix{Float64}(1,1)
+Γ = Matrix{Float64}(undef, 1,1)
 Γ[1,1] = κ
 J = [a]
 Jdagger = [at]
@@ -78,7 +78,7 @@ f_HJ_nh_dynamic2(t, rho) = (Hnh=f_H(t, psi0) - 0.5im*κ*n; (Hnh, dagger(Hnh), [s
 f_HJ_nh_dynamic3(t, rho) = (Hnh=f_H(t, psi0) - 0.5im*κ*n; (Hnh, dagger(Hnh), J, Jdagger, Γ))
 
 timeevolution.master_dynamic(T, psi0, f_HJ_dynamic; rates=Γ, fout=f_test_decay_dynamic)
-timeevolution.master_dynamic(T, psi0, f_HJ_dynamic2; fout=f_test_decay_dynamic)
+@skiptimechecks timeevolution.master_dynamic(T, psi0, f_HJ_dynamic2; fout=f_test_decay_dynamic)
 timeevolution.master_nh_dynamic(T, psi0, f_HJ_nh_dynamic; rates=Γ, fout=f_test_decay_dynamic)
 timeevolution.master_nh_dynamic(T, psi0, f_HJ_nh_dynamic2; fout=f_test_decay_dynamic)
 timeevolution.master_nh_dynamic(T, psi0, f_HJ_nh_dynamic3; fout=f_test_decay_dynamic)

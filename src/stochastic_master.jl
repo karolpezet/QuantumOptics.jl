@@ -1,15 +1,6 @@
-module stochastic_master
+import ...timeevolution: dmaster_h, dmaster_nh, dmaster_h_dynamic, check_master
 
-export master, master_dynamic
-
-using ...bases, ...states, ...operators
-using ...operators_dense, ...operators_sparse
-using ...timeevolution
-import ...timeevolution: integrate_stoch, recast!
-import ...timeevolution.timeevolution_master: dmaster_h, dmaster_nh, dmaster_h_dynamic, check_master
-
-const DecayRates = Union{Vector{Float64}, Matrix{Float64}, Void}
-const DiffArray = Union{Vector{Complex128}, Array{Complex128, 2}}
+const DecayRates = Union{Vector{Float64}, Matrix{Float64}, Nothing}
 
 """
     stochastic.master(tspan, rho0, H, J, C; <keyword arguments>)
@@ -40,23 +31,23 @@ non-hermitian Hamiltonian and then calls master_nh which is slightly faster.
         be changed.
 * `kwargs...`: Further arguments are passed on to the ode solver.
 """
-function master(tspan, rho0::DenseOperator, H::Operator,
+function master(tspan, rho0::T, H::AbstractOperator{B,B},
                 J::Vector, C::Vector;
                 rates::DecayRates=nothing,
                 Jdagger::Vector=dagger.(J), Cdagger::Vector=dagger.(C),
-                fout::Union{Function,Void}=nothing,
-                kwargs...)
+                fout::Union{Function,Nothing}=nothing,
+                kwargs...) where {B<:Basis,T<:DenseOperator{B,B}}
 
     tmp = copy(rho0)
 
     n = length(C)
 
-    dmaster_stoch(dx::DiffArray, t::Float64, rho::DenseOperator, drho::DenseOperator, n::Int) =
+    dmaster_stoch(dx::DiffArray, t::Float64, rho::T, drho::T, n::Int) =
             dmaster_stochastic(dx, rho, C, Cdagger, drho, n)
 
-    isreducible = check_master(rho0, H, J, Jdagger, rates)
+    isreducible = check_master(rho0, H, J, Jdagger, rates) && check_master_stoch(rho0, C, Cdagger)
     if !isreducible
-        dmaster_h_determ(t::Float64, rho::DenseOperator, drho::DenseOperator) =
+        dmaster_h_determ(t::Float64, rho::T, drho::T) =
             dmaster_h(rho, H, rates, J, Jdagger, drho, tmp)
         integrate_master_stoch(tspan, dmaster_h_determ, dmaster_stoch, rho0, fout, n; kwargs...)
     else
@@ -76,7 +67,7 @@ function master(tspan, rho0::DenseOperator, H::Operator,
         end
         Hnhdagger = dagger(Hnh)
 
-        dmaster_nh_determ(t::Float64, rho::DenseOperator, drho::DenseOperator) =
+        dmaster_nh_determ(t::Float64, rho::T, drho::T) =
             dmaster_nh(rho, Hnh, Hnhdagger, rates, J, Jdagger, drho, tmp)
         integrate_master_stoch(tspan, dmaster_nh_determ, dmaster_stoch, rho0, fout, n; kwargs...)
     end
@@ -112,11 +103,11 @@ dynamic Hamiltonian and J.
         number if you want to avoid an initial calculation of function outputs!
 * `kwargs...`: Further arguments are passed on to the ode solver.
 """
-function master_dynamic(tspan::Vector{Float64}, rho0::DenseOperator, fdeterm::Function, fstoch::Function;
+function master_dynamic(tspan::Vector{Float64}, rho0::T, fdeterm::Function, fstoch::Function;
                 rates::DecayRates=nothing,
-                fout::Union{Function,Void}=nothing,
+                fout::Union{Function,Nothing}=nothing,
                 noise_processes::Int=0,
-                kwargs...)
+                kwargs...) where {B<:Basis,T<:DenseOperator{B,B}}
 
     tmp = copy(rho0)
 
@@ -127,43 +118,44 @@ function master_dynamic(tspan::Vector{Float64}, rho0::DenseOperator, fdeterm::Fu
         n = noise_processes
     end
 
-    dmaster_determ(t::Float64, rho::DenseOperator, drho::DenseOperator) = dmaster_h_dynamic(t, rho, fdeterm, rates, drho, tmp)
-    dmaster_stoch(dx::DiffArray, t::Float64, rho::DenseOperator, drho::DenseOperator, n::Int) =
+    dmaster_determ(t::Float64, rho::T, drho::T) = dmaster_h_dynamic(t, rho, fdeterm, rates, drho, tmp)
+    dmaster_stoch(dx::DiffArray, t::Float64, rho::T, drho::T, n::Int) =
         dmaster_stoch_dynamic(dx, t, rho, fstoch, drho, n)
     integrate_master_stoch(tspan, dmaster_determ, dmaster_stoch, rho0, fout, n; kwargs...)
 end
 master_dynamic(tspan::Vector{Float64}, psi0::Ket, args...; kwargs...) = master_dynamic(tspan, dm(psi0), args...; kwargs...)
 
 # Derivative functions
-function dmaster_stochastic(dx::Vector{Complex128}, rho::DenseOperator,
-            C::Vector, Cdagger::Vector, drho::DenseOperator, ::Int)
+function dmaster_stochastic(dx::Vector{ComplexF64}, rho::T,
+            C::Vector, Cdagger::Vector, drho::T, ::Int) where {B<:Basis,T<:DenseOperator{B,B}}
     recast!(dx, drho)
-    operators.gemm!(1, C[1], rho, 0, drho)
-    operators.gemm!(1, rho, Cdagger[1], 1, drho)
-    drho.data .-= trace(drho)*rho.data
+    QuantumOpticsBase.gemm!(1, C[1], rho, 0, drho)
+    QuantumOpticsBase.gemm!(1, rho, Cdagger[1], 1, drho)
+    drho.data .-= tr(drho)*rho.data
 end
-function dmaster_stochastic(dx::Array{Complex128, 2}, rho::DenseOperator,
-            C::Vector, Cdagger::Vector, drho::DenseOperator, n::Int)
+function dmaster_stochastic(dx::Array{ComplexF64, 2}, rho::T,
+            C::Vector, Cdagger::Vector, drho::T, n::Int) where {B<:Basis,T<:DenseOperator{B,B}}
     for i=1:n
         dx_i = @view dx[:, i]
         recast!(dx_i, drho)
-        operators.gemm!(1, C[i], rho, 0, drho)
-        operators.gemm!(1, rho, Cdagger[i], 1, drho)
-        drho.data .-= trace(drho)*rho.data
+        QuantumOpticsBase.gemm!(1, C[i], rho, 0, drho)
+        QuantumOpticsBase.gemm!(1, rho, Cdagger[i], 1, drho)
+        drho.data .-= tr(drho)*rho.data
         recast!(drho, dx_i)
     end
 end
 
-function dmaster_stoch_dynamic(dx::DiffArray, t::Float64, rho::DenseOperator,
-            f::Function, drho::DenseOperator, n::Int)
+function dmaster_stoch_dynamic(dx::DiffArray, t::Float64, rho::T,
+            f::Function, drho::T, n::Int) where {B<:Basis,T<:DenseOperator{B,B}}
     result = f(t, rho)
-    @assert 2 == length(result)
+    QO_CHECKS[] && @assert 2 == length(result)
     C, Cdagger = result
+    QO_CHECKS[] && check_master_stoch(rho, C, Cdagger)
     dmaster_stochastic(dx, rho, C, Cdagger, drho, n)
 end
 
 function integrate_master_stoch(tspan, df::Function, dg::Function,
-                        rho0::DenseOperator, fout::Union{Void, Function},
+                        rho0::DenseOperator, fout::Union{Nothing, Function},
                         n::Int;
                         kwargs...)
     tspan_ = convert(Vector{Float64}, tspan)
@@ -173,11 +165,29 @@ function integrate_master_stoch(tspan, df::Function, dg::Function,
     integrate_stoch(tspan_, df, dg, x0, state, dstate, fout, n; kwargs...)
 end
 
+function check_master_stoch(rho0::DenseOperator{B,B}, C::Vector, Cdagger::Vector) where B<:Basis
+    # TODO: replace type checks by dispatch; make types of C known
+    @assert length(C) == length(Cdagger)
+    isreducible = true
+    for c=C
+        @assert isa(c, AbstractOperator{B,B})
+        if !(isa(c, DenseOperator) || isa(c, SparseOperator))
+            isreducible = false
+        end
+    end
+    for c=Cdagger
+        @assert isa(c, AbstractOperator{B,B})
+        if !(isa(c, DenseOperator) || isa(c, SparseOperator))
+            isreducible = false
+        end
+    end
+    isreducible
+end
+
+
 # TODO: Speed up by recasting to n-d arrays, remove vector methods
-function recast!(x::Union{Vector{Complex128}, SubArray{Complex128, 1}}, rho::DenseOperator)
+function recast!(x::Union{Vector{ComplexF64}, SubArray{ComplexF64, 1}}, rho::DenseOperator{B,B,T}) where {B<:Basis,T<:Matrix{ComplexF64}}
     rho.data = reshape(x, size(rho.data))
 end
-recast!(state::DenseOperator, x::SubArray{Complex128, 1}) = (x[:] = state.data)
-recast!(state::DenseOperator, x::Vector{Complex128}) = nothing
-
-end # module
+recast!(state::DenseOperator{B,B}, x::SubArray{ComplexF64, 1}) where B<:Basis = (x[:] = state.data)
+recast!(state::DenseOperator{B,B}, x::Vector{ComplexF64}) where B<:Basis = nothing

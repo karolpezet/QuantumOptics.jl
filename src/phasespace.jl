@@ -1,9 +1,3 @@
-module phasespace
-
-export qfunc, wigner, coherentspinstate, qfuncsu2, wignersu2, ylm
-
-using ..bases, ..states, ..operators, ..operators_dense, ..fock, ..spin
-
 import WignerSymbols: clebschgordan
 
 """
@@ -16,30 +10,27 @@ function can either be evaluated on one point α or on a grid specified by
 the vectors `xvec` and `yvec`. Note that conversion from `x` and `y` to `α` is
 done via the relation ``α = \\frac{1}{\\sqrt{2}}(x + i y)``.
 """
-function qfunc(rho::Operator, alpha::Number)
+function qfunc(rho::AbstractOperator{B,B}, alpha::Number) where B<:FockBasis
     b = basis(rho)
-    @assert isa(b, FockBasis)
-    _qfunc_operator(rho, convert(Complex128, alpha), Ket(b), Ket(b))
+    _qfunc_operator(rho, convert(ComplexF64, alpha), Ket(b), Ket(b))
 end
 
-function qfunc(rho::Operator, xvec::Vector{Float64}, yvec::Vector{Float64})
+function qfunc(rho::AbstractOperator{B,B}, xvec::Vector{Float64}, yvec::Vector{Float64}) where B<:FockBasis
     b = basis(rho)
-    @assert isa(b, FockBasis)
     Nx = length(xvec)
     Ny = length(yvec)
     tmp1 = Ket(b)
     tmp2 = Ket(b)
-    result = Matrix{Complex128}(Nx, Ny)
+    result = Matrix{ComplexF64}(undef, Nx, Ny)
     @inbounds for j=1:Ny, i=1:Nx
         result[i, j] = _qfunc_operator(rho, complex(xvec[i], yvec[j])/sqrt(2), tmp1, tmp2)
     end
     result
 end
 
-function qfunc(psi::Ket, alpha::Number)
+function qfunc(psi::Ket{B}, alpha::Number) where B<:FockBasis
     b = basis(psi)
-    @assert isa(b, FockBasis)
-    _alpha = convert(Complex128, alpha)
+    _alpha = convert(ComplexF64, alpha)
     _conj_alpha = conj(_alpha)
     N = length(psi.basis)
     s = psi.data[N]/sqrt(N-1)
@@ -50,9 +41,8 @@ function qfunc(psi::Ket, alpha::Number)
     return abs2(s)*exp(-abs2(_alpha))/pi
 end
 
-function qfunc(psi::Ket, xvec::Vector{Float64}, yvec::Vector{Float64})
+function qfunc(psi::Ket{B}, xvec::Vector{Float64}, yvec::Vector{Float64}) where B<:FockBasis
     b = basis(psi)
-    @assert isa(b, FockBasis)
     Nx = length(xvec)
     Ny = length(yvec)
     points = Nx*Ny
@@ -74,13 +64,13 @@ function qfunc(psi::Ket, xvec::Vector{Float64}, yvec::Vector{Float64})
     result
 end
 
-function qfunc(state::Union{Ket, Operator}, x::Number, y::Number)
-    qfunc(state, Complex128(x, y)/sqrt(2))
+function qfunc(state::Union{Ket{B}, AbstractOperator{B,B}}, x::Number, y::Number) where B<:FockBasis
+    qfunc(state, ComplexF64(x, y)/sqrt(2))
 end
 
-function _qfunc_operator(rho::Operator, alpha::Complex128, tmp1::Ket, tmp2::Ket)
-    coherentstate(basis(rho), alpha, tmp1)
-    operators.gemv!(complex(1.), rho, tmp1, complex(0.), tmp2)
+function _qfunc_operator(rho::AbstractOperator{B,B}, alpha::ComplexF64, tmp1::Ket, tmp2::Ket) where B<:FockBasis
+    coherentstate!(tmp1, basis(rho), alpha)
+    QuantumOpticsBase.gemv!(complex(1.), rho, tmp1, complex(0.), tmp2)
     a = dot(tmp1.data, tmp2.data)
     return a/pi
 end
@@ -96,9 +86,8 @@ function can either be evaluated on one point α or on a grid specified by
 the vectors `xvec` and `yvec`. Note that conversion from `x` and `y` to `α` is
 done via the relation ``α = \\frac{1}{\\sqrt{2}}(x + i y)``.
 """
-function wigner(rho::DenseOperator, x::Number, y::Number)
+function wigner(rho::DenseOperator{B,B}, x::Number, y::Number) where B<:FockBasis
     b = basis(rho)
-    @assert isa(b, FockBasis)
     N = b.N::Int
     _2α = complex(convert(Float64, x), convert(Float64, y))*sqrt(2)
     abs2_2α = abs2(_2α)
@@ -113,13 +102,12 @@ function wigner(rho::DenseOperator, x::Number, y::Number)
     exp(-abs2_2α/2)/pi*real(w)
 end
 
-function wigner(rho::DenseOperator, xvec::Vector{Float64}, yvec::Vector{Float64})
+function wigner(rho::DenseOperator{B,B}, xvec::Vector{Float64}, yvec::Vector{Float64}) where B<:FockBasis
     b = basis(rho)
-    @assert isa(b, FockBasis)
     N = b.N::Int
     _2α = [complex(x, y)*sqrt(2) for x=xvec, y=yvec]
     abs2_2α = abs2.(_2α)
-    w = zeros(_2α)
+    w = zero(_2α)
     b0 = similar(_2α)
     b1 = similar(_2α)
     b2 = similar(_2α)
@@ -137,9 +125,9 @@ wigner(psi::Ket, x, y) = wigner(dm(psi), x, y)
 wigner(state, alpha::Number) = wigner(state, real(alpha)*sqrt(2), imag(alpha)*sqrt(2))
 
 
-function _clenshaw_grid(L::Int, ρ::Matrix{Complex128},
-                abs2_2α::Matrix{Float64}, _2α::Matrix{Complex128}, w::Matrix{Complex128},
-                b0::Matrix{Complex128}, b1::Matrix{Complex128}, b2::Matrix{Complex128}, scale::Int)
+function _clenshaw_grid(L::Int, ρ::Matrix{ComplexF64},
+                abs2_2α::Matrix{Float64}, _2α::Matrix{ComplexF64}, w::Matrix{ComplexF64},
+                b0::Matrix{ComplexF64}, b1::Matrix{ComplexF64}, b2::Matrix{ComplexF64}, scale::Int)
     n = size(ρ, 1)-L-1
     points = length(w)
     if n==0
@@ -179,7 +167,7 @@ function _clenshaw_grid(L::Int, ρ::Matrix{Complex128},
     end
 end
 
-function _clenshaw(L::Int, abs2_2α::Float64, ρ::Matrix{Complex128})
+function _clenshaw(L::Int, abs2_2α::Float64, ρ::Matrix{ComplexF64})
     n = size(ρ, 1)-L-1
     if n==0
         return ρ[1, L+1]
@@ -215,7 +203,7 @@ parametrization is not unique), similarly to a qubit on the
 Bloch sphere.
 """
 function coherentspinstate(b::SpinBasis, theta::Real, phi::Real,
-    result = Ket(b, Vector{Complex128}(length(b))))
+    result = Ket(b, Vector{ComplexF64}(undef, length(b))))
     data = result.data
     N = BigInt(length(b)-1)
     sinth = sin(0.5theta)
@@ -243,23 +231,21 @@ resolution `(Ntheta, Nphi)`.
 
 This version calculates the Husimi Q SU(2) function at a position given by θ and ϕ.
 """
-function qfuncsu2(psi::Ket, Ntheta::Int; Nphi::Int=2Ntheta)
+function qfuncsu2(psi::Ket{B}, Ntheta::Int; Nphi::Int=2Ntheta) where B<:SpinBasis
     b = psi.basis
     psi_bra_data = psi.data'
     lb = float(b.spinnumber)
-    @assert isa(b, SpinBasis)
-    result = Array{Float64}(Ntheta,Nphi)
+    result = Array{Float64}(undef, Ntheta,Nphi)
     @inbounds  for i = 0:Ntheta-1, j = 0:Nphi-1
         result[i+1,j+1] = (2*lb+1)/(4pi)*abs2(psi_bra_data*coherentspinstate(b,pi-i*pi/(Ntheta-1),j*2pi/(Nphi-1)-pi).data)
     end
     return result
 end
 
-function qfuncsu2(rho::DenseOperator, Ntheta::Int; Nphi::Int=2Ntheta)
+function qfuncsu2(rho::DenseOperator{B,B}, Ntheta::Int; Nphi::Int=2Ntheta) where B<:SpinBasis
     b = basis(rho)
     lb = float(b.spinnumber)
-    @assert isa(b, SpinBasis)
-    result = Array{Float64}(Ntheta,Nphi)
+    result = Array{Float64}(undef, Ntheta,Nphi)
     @inbounds  for i = 0:Ntheta-1, j = 0:Nphi-1
         c = coherentspinstate(b,pi-i*1pi/(Ntheta-1),j*2pi/(Nphi-1)-pi)
         result[i+1,j+1] = abs((2*lb+1)/(4pi)*c.data'*rho.data*c.data)
@@ -267,19 +253,17 @@ function qfuncsu2(rho::DenseOperator, Ntheta::Int; Nphi::Int=2Ntheta)
     return result
 end
 
-function qfuncsu2(psi::Ket, theta::Real, phi::Real)
+function qfuncsu2(psi::Ket{B}, theta::Real, phi::Real) where B<:SpinBasis
     b = basis(psi)
     psi_bra_data = psi.data'
     lb = float(b.spinnumber)
-    @assert isa(b, SpinBasis)
     result = (2*lb+1)/(4pi)*abs2(psi_bra_data*coherentspinstate(b,theta,phi).data)
     return result
 end
 
-function qfuncsu2(rho::DenseOperator, theta::Real, phi::Real)
+function qfuncsu2(rho::DenseOperator{B,B}, theta::Real, phi::Real) where B<:SpinBasis
     b = basis(rho)
     lb = float(b.spinnumber)
-    @assert isa(b, SpinBasis)
     c = coherentspinstate(b,theta,phi)
     result = abs((2*lb+1)/(4pi)*c.data'*rho.data*c.data)
     return result
@@ -300,14 +284,14 @@ decomposing the state into the basis of spherical harmonics.
 
 This version calculates the Wigner SU(2) function at a position given by θ and ϕ
 """
-function wignersu2(rho::DenseOperator, theta::Real, phi::Real)
+function wignersu2(rho::DenseOperator{B,B}, theta::Real, phi::Real) where B<:SpinBasis
 
     N = length(basis(rho))-1
 
     ### Tensor generation ###
-    BandT = Array{Vector{Float64}}(N,N+1)
-    BandT[1,1] = collect(linspace(-N/2, N/2, N+1))
-    BandT[1,2] = -collect(sqrt.(linspace(1, N, N)).*sqrt.(linspace((N)/2, 1/2, N)))
+    BandT = Array{Vector{Float64}}(undef, N,N+1)
+    BandT[1,1] = collect(range(-N/2, stop=N/2, length=N+1))
+    BandT[1,2] = -collect(sqrt.(range(1, stop=N, length=N)).*sqrt.(range((N)/2, stop=1/2, length=N)))
     BandT[2,1] = clebschgordan(1,0,1,0,2,0)*BandT[1,1].*BandT[1,1] -
         clebschgordan(1,-1,1,1,2,0)*[zeros(N+1-length(BandT[1,2])); BandT[1,2].*BandT[1,2]] -
         clebschgordan(1,1,1,-1,2,0)*[BandT[1,2].*BandT[1,2]; zeros(N+1-length(BandT[1,2]))]
@@ -341,7 +325,7 @@ function wignersu2(rho::DenseOperator, theta::Real, phi::Real)
 
     ### State decomposition ###
     c = rho.data
-    EVT = Array{Complex128}(N,N+1)
+    EVT = Array{ComplexF64}(undef, N,N+1)
     @inbounds for S = 1:N, M = 0:S
         EVT[S,M+1] = conj(sum(BandT[S,M+1].*diag(c,M)))
     end
@@ -350,14 +334,14 @@ function wignersu2(rho::DenseOperator, theta::Real, phi::Real)
     return wignermap*sqrt((N+1)/(4pi))
 end
 
-function wignersu2(rho::DenseOperator, Ntheta::Int; Nphi::Int=2Ntheta)
+function wignersu2(rho::DenseOperator{B,B}, Ntheta::Int; Nphi::Int=2Ntheta) where B<:SpinBasis
 
     N = length(basis(rho))-1
 
     ### Tensor generation ###
-    BandT = Array{Vector{Float64}}(N,N+1)
-    BandT[1,1] = collect(linspace(-N/2, N/2, N+1))
-    BandT[1,2] = -collect(sqrt.(linspace(1, N, N)).*sqrt.(linspace((N)/2, 1/2, N)))
+    BandT = Array{Vector{Float64}}(undef, N,N+1)
+    BandT[1,1] = collect(range(-N/2, stop=N/2, length=N+1))
+    BandT[1,2] = -collect(sqrt.(range(1, stop=N, length=N)).*sqrt.(range((N)/2, stop=1/2, length=N)))
     BandT[2,1] = clebschgordan(1,0,1,0,2,0)*BandT[1,1].*BandT[1,1] -
         clebschgordan(1,-1,1,1,2,0)*[zeros(N+1-length(BandT[1,2])); BandT[1,2].*BandT[1,2]] -
         clebschgordan(1,1,1,-1,2,0)*[BandT[1,2].*BandT[1,2]; zeros(N+1-length(BandT[1,2]))]
@@ -389,19 +373,19 @@ function wignersu2(rho::DenseOperator, Ntheta::Int; Nphi::Int=2Ntheta)
 
     ### State decomposition ###
     c = rho.data
-    EVT = Array{Complex128}(N,N+1)
+    EVT = Array{ComplexF64}(undef, N,N+1)
     @inbounds for S = 1:N, M = 0:S
         EVT[S,M+1] = conj(sum(BandT[S,M+1].*diag(c,M)))
     end
 
-    wignermap = Array{Float64}(Ntheta,Nphi)
+    wignermap = Array{Float64}(undef, Ntheta,Nphi)
     @inbounds for i = 1:Ntheta, j = 1:Nphi
         wignermap[i,j] = _wignersu2int(N,i*1pi/(Ntheta-1)-1pi/(Ntheta-1),j*2pi/(Nphi-1)-2pi/(Nphi-1)-pi, EVT)
     end
     return wignermap*sqrt((N+1)/(4pi))
 end
 
-function _wignersu2int(N::Integer, theta::Real, phi::Real, EVT::Array{Complex128, 2})
+function _wignersu2int(N::Integer, theta::Real, phi::Real, EVT::Array{ComplexF64, 2})
     UberBand = sqrt(1/(1+N))*ylm(0,0,theta,phi)
     @inbounds for S = 1:N
         @inbounds for M = 1:S
@@ -424,7 +408,7 @@ This function calculates the value of Y(l,m) spherical harmonic at position θ a
 function ylm(l::Integer,m::Integer,theta::Real,phi::Real)
     phi_ = mod(phi,2pi)
     theta_ = mod(theta,2pi)
-    phase = e^(1.0im*m*phi_)
+    phase = exp(1.0im*m*phi_)
     if theta_ ≈ 0
         if m == 0
             return @. phase*sqrt((2*l+1)/pi)/2
@@ -479,5 +463,3 @@ function _calc_ylm_norm(l::Int, m_::Int)
     end
     norm
 end
-
-end #module

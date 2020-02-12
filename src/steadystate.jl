@@ -1,8 +1,8 @@
 module steadystate
 
-using ..states, ..operators, ..operators_dense, ..superoperators
+using QuantumOpticsBase
 using ..timeevolution
-
+using Arpack, LinearAlgebra
 
 """
     steadystate.master(H, J; <keyword arguments>)
@@ -26,13 +26,13 @@ Calculate steady state using long time master equation evolution.
         density operator `rho` is further used and therefore must not be changed.
 * `kwargs...`: Further arguments are passed on to the ode solver.
 """
-function master(H::Operator, J::Vector;
-                rho0::DenseOperator=tensor(basisstate(H.basis_l, 1), dagger(basisstate(H.basis_r, 1))),
+function master(H::AbstractOperator{B,B}, J::Vector;
+                rho0::DenseOperator{B,B}=tensor(basisstate(H.basis_l, 1), dagger(basisstate(H.basis_r, 1))),
                 hmin=1e-7, tol=1e-3,
-                rates::Union{Vector{Float64}, Matrix{Float64}, Void}=nothing,
+                rates::Union{Vector{Float64}, Matrix{Float64}, Nothing}=nothing,
                 Jdagger::Vector=dagger.(J),
-                fout::Union{Function,Void}=nothing,
-                kwargs...)
+                fout::Union{Function,Nothing}=nothing,
+                kwargs...) where B<:Basis
     t,u = timeevolution.master([0., Inf], rho0, H, J; rates=rates, Jdagger=Jdagger,
                         hmin=hmin, hmax=Inf,
                         display_initialvalue=false,
@@ -48,46 +48,47 @@ end
     steadystate.liouvillianspectrum(H, J)
 
 Calculate eigenspectrum of the Liouvillian matrix `L`. The eigenvalues and -states are
-sorted according to the real part of the eigenvalues.
+sorted according to the absolute value of the eigenvalues.
 
 # Keyword arguments:
 * `nev = min(10, length(L.basis_r[1])*length(L.basis_r[2]))`: Number of eigenvalues.
-* `which = :LR`: Find eigenvalues with largest real part. Keyword for `eigs` function (ineffective for DenseSuperOperator).
-* `kwargs...`:  Keyword arguments for the Julia `eig` or `eigs` function.
+* `which = :LR`: Find eigenvalues with largest real part. Keyword for `eigs`
+    function (ineffective for DenseSuperOperator).
+* `kwargs...`:  Keyword arguments for the Julia `eigen` or `eigens` function.
 """
 function liouvillianspectrum(L::DenseSuperOperator; nev::Int = min(10, length(L.basis_r[1])*length(L.basis_r[2])), which::Symbol = :LR, kwargs...)
-    d, v = Base.eig(L.data; kwargs...)
-    indices = sortperm(-real(d))[1:nev]
+    d, v = eigen(L.data; kwargs...)
+    indices = sortperm(abs.(d))[1:nev]
     ops = DenseOperator[]
     for i in indices
         data = reshape(v[:,i], length(L.basis_r[1]), length(L.basis_r[2]))
         op = DenseOperator(L.basis_r[1], L.basis_r[2], data)
-        push!(ops, op/trace(op))
+        push!(ops, op)
     end
     return d[indices], ops
 end
 
 function liouvillianspectrum(L::SparseSuperOperator; nev::Int = min(10, length(L.basis_r[1])*length(L.basis_r[2])), which::Symbol = :LR, kwargs...)
     d, v, nconv, niter, nmult, resid = try
-        Base.eigs(L.data; nev = nev, which = which, kwargs...)
+        eigs(L.data; nev = nev, which = which, kwargs...)
     catch err
-        if isa(err, LinAlg.SingularException) || isa(err, LinAlg.ARPACKException)
-            error("Base.LinAlg.eigs() algorithm failed; try using DenseOperators or change nev.")
+        if isa(err, SingularException) || isa(err, Arpack.ARPACKException)
+            error("Arpack's eigs() algorithm failed; try using DenseOperators or change nev.")
         else
             rethrow(err)
         end
     end
-    indices = sortperm(-real(d))[1:nev]
+    indices = sortperm(abs.(d))[1:nev]
     ops = DenseOperator[]
     for i in indices
         data = reshape(v[:,i], length(L.basis_r[1]), length(L.basis_r[2]))
         op = DenseOperator(L.basis_r[1], L.basis_r[2], data)
-        push!(ops, op/trace(op))
+        push!(ops, op)
     end
     return d[indices], ops
 end
 
-liouvillianspectrum(H::Operator, J::Vector; rates::Union{Vector{Float64}, Matrix{Float64}}=ones(Float64, length(J)), kwargs...) = liouvillianspectrum(liouvillian(H, J; rates=rates); kwargs...)
+liouvillianspectrum(H::AbstractOperator{B,B}, J::Vector; rates::Union{Vector{Float64}, Matrix{Float64}}=ones(Float64, length(J)), kwargs...) where B<:Basis = liouvillianspectrum(liouvillian(H, J; rates=rates); kwargs...)
 
 """
     steadystate.eigenvector(L)
@@ -96,30 +97,28 @@ liouvillianspectrum(H::Operator, J::Vector; rates::Union{Vector{Float64}, Matrix
 Find steady state by calculating the eigenstate with eigenvalue 0 of the Liouvillian matrix `L`, if it exists.
 
 # Keyword arguments:
-* `tol = 1e-9`: Check `abs(real(eigenvalue)) < tol` to determine zero eigenvalue.
+* `tol = 1e-9`: Check `abs(eigenvalue) < tol` to determine zero eigenvalue.
 * `nev = 2`: Number of calculated eigenvalues. If `nev > 1` it is checked if there
-is only one eigenvalue with real part 0. No checks for `nev = 1`: use if faster
-or for avoiding convergence errors of `eigs`. Changing `nev` thus only makes sense when using SparseSuperOperator.
+    is only one eigenvalue with real part 0. No checks for `nev = 1`: use if
+    faster or for avoiding convergence errors of `eigs`. Changing `nev` thus only
+    makes sense when using SparseSuperOperator.
 * `which = :LR`: Find eigenvalues with largest real part. Keyword for `eigs` function (ineffective for DenseSuperOperator).
-* `kwargs...`:  Keyword arguments for the Julia `eig` or `eigs` function.
+* `kwargs...`:  Keyword arguments for the Julia `eigen` or `eigs` function.
 """
 function eigenvector(L::SuperOperator; tol::Real = 1e-9, nev::Int = 2, which::Symbol = :LR, kwargs...)
     d, ops = liouvillianspectrum(L; nev = nev, which = which, kwargs...)
-    if abs(real(d[1])) > tol
-        error("Eigenvalue with largest real part is not zero.")
+    if abs(d[1]) > tol
+        error("Eigenvalue with smallest absolute value is not zero.")
     end
     if nev > 1
         if abs(real(d[2])) < tol
-            warn("Several eigenvalues with real part 0 detected; use steadystate.liouvillianspectrum to find out more.")
+            @warn("Several eigenvalues with real part 0 detected; use steadystate.liouvillianspectrum to find out more.")
         end
     end
-    if abs(imag(d[1])) > tol
-        warn("Imaginary part of eigenvalue not zero.")
-    end
-    return ops[1]
+    return ops[1]/tr(ops[1])
 end
 
-eigenvector(H::Operator, J::Vector; rates::Union{Vector{Float64}, Matrix{Float64}}=ones(Float64, length(J)), kwargs...) = eigenvector(liouvillian(H, J; rates=rates); kwargs...)
+eigenvector(H::AbstractOperator, J::Vector; rates::Union{Vector{Float64}, Matrix{Float64}}=ones(Float64, length(J)), kwargs...) = eigenvector(liouvillian(H, J; rates=rates); kwargs...)
 
 
 end # module

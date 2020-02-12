@@ -2,8 +2,10 @@ module timecorrelations
 
 export correlation, spectrum, correlation2spectrum
 
-using ..states, ..operators, ..operators_dense
-using ..metrics, ..timeevolution, ..steadystate
+using QuantumOpticsBase
+using ..timeevolution, ..steadystate
+
+using FFTW
 
 
 """
@@ -31,11 +33,11 @@ criterion specified in [`steadystate.master`](@ref).
 * `Jdagger=dagger.(J)`: Vector containing the hermitian conjugates of the jump
 * `kwargs...`: Further arguments are passed on to the ode solver.
 """
-function correlation(tspan::Vector{Float64}, rho0::DenseOperator, H::Operator, J::Vector,
-                     op1::Operator, op2::Operator;
-                     rates::Union{Vector{Float64}, Matrix{Float64}, Void}=nothing,
+function correlation(tspan::Vector{Float64}, rho0::DenseOperator{B,B}, H::AbstractOperator{B,B}, J::Vector,
+                     op1::AbstractOperator{B,B}, op2::AbstractOperator{B,B};
+                     rates::Union{Vector{Float64}, Matrix{Float64}, Nothing}=nothing,
                      Jdagger::Vector=dagger.(J),
-                     kwargs...)
+                     kwargs...) where B<:Basis
     function fout(t, rho)
         expect(op1, rho)
     end
@@ -44,12 +46,12 @@ function correlation(tspan::Vector{Float64}, rho0::DenseOperator, H::Operator, J
     u
 end
 
-function correlation(rho0::DenseOperator, H::Operator, J::Vector,
-                     op1::Operator, op2::Operator;
+function correlation(rho0::DenseOperator{B,B}, H::AbstractOperator{B,B}, J::Vector,
+                     op1::AbstractOperator{B,B}, op2::AbstractOperator{B,B};
                      tol::Float64=1e-4, h0=10.,
-                     rates::Union{Vector{Float64}, Matrix{Float64}, Void}=nothing,
+                     rates::Union{Vector{Float64}, Matrix{Float64}, Nothing}=nothing,
                      Jdagger::Vector=dagger.(J),
-                     kwargs...)
+                     kwargs...) where B<:Basis
     op2rho0 = op2*rho0
     exp1 = expect(op1, op2rho0)
     function fout(t, rho)
@@ -94,11 +96,11 @@ automatically.
 * `kwargs...`: Further arguments are passed on to the ode solver.
 """
 function spectrum(omega_samplepoints::Vector{Float64},
-                H::Operator, J::Vector, op::Operator;
-                rho0::DenseOperator=tensor(basisstate(H.basis_l, 1), dagger(basisstate(H.basis_r, 1))),
+                H::AbstractOperator{B,B}, J::Vector, op::AbstractOperator{B,B};
+                rho0::DenseOperator{B,B}=tensor(basisstate(H.basis_l, 1), dagger(basisstate(H.basis_r, 1))),
                 tol::Float64=1e-4,
-                rho_ss::DenseOperator=steadystate.master(H, J; tol=tol, rho0=rho0)[end][end],
-                kwargs...)
+                rho_ss::DenseOperator{B,B}=steadystate.master(H, J; tol=tol, rho0=rho0)[end][end],
+                kwargs...) where B<:Basis
     domega = minimum(diff(omega_samplepoints))
     dt = 2*pi/abs(omega_samplepoints[end] - omega_samplepoints[1])
     T = 2*pi/domega
@@ -108,11 +110,11 @@ function spectrum(omega_samplepoints::Vector{Float64},
     return omega_samplepoints, S
 end
 
-function spectrum(H::Operator, J::Vector, op::Operator;
-                rho0::DenseOperator=tensor(basisstate(H.basis_l, 1), dagger(basisstate(H.basis_r, 1))),
+function spectrum(H::AbstractOperator{B,B}, J::Vector, op::AbstractOperator{B,B};
+                rho0::DenseOperator{B,B}=tensor(basisstate(H.basis_l, 1), dagger(basisstate(H.basis_r, 1))),
                 tol::Float64=1e-4, h0=10.,
-                rho_ss::DenseOperator=steadystate.master(H, J; tol=tol)[end][end],
-                kwargs...)
+                rho_ss::DenseOperator{B,B}=steadystate.master(H, J; tol=tol)[end][end],
+                kwargs...) where B<:Basis
     tspan, exp_values = correlation(rho_ss, H, J, dagger(op), op, tol=tol, h0=h0, kwargs...)
     dtmin = minimum(diff(tspan))
     T = tspan[end] - tspan[1]
@@ -125,16 +127,16 @@ end
 
 
 """
-    timecorrelations.correlation2spectrum(tspan, corr; normalize)
+    timecorrelations.correlation2spectrum(tspan, corr; normalize_spec)
 
 Calculate spectrum as Fourier transform of a correlation function with a given correlation function.
 
 # Arguments
 * `tspan`: List of time points corresponding to the correlation function.
 * `corr`: Correlation function of which the Fourier transform is to be calculated.
-* `normalize`: Specify if spectrum should be normalized to its maximum.
+* `normalize_spec`: Specify if spectrum should be normalized to its maximum.
 """
-function correlation2spectrum(tspan::Vector{Float64}, corr::Vector{T}; normalize::Bool=false) where T <: Number
+function correlation2spectrum(tspan::Vector{Float64}, corr::Vector{T}; normalize_spec::Bool=false) where T <: Number
   n = length(tspan)
   if length(corr) != n
     ArgumentError("tspan and corr must be of same length!")
@@ -152,7 +154,7 @@ function correlation2spectrum(tspan::Vector{Float64}, corr::Vector{T}; normalize
   omega .*= 2pi/tmax
   spec = 2dt.*fftshift(real(fft(corr)))
 
-  omega, normalize ? spec./maximum(spec) : spec
+  omega, normalize_spec ? spec./maximum(spec) : spec
 end
 
 

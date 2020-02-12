@@ -1,5 +1,6 @@
-using Base.Test
+using Test
 using QuantumOptics
+using LinearAlgebra
 
 @testset "timeevolution_twolevel" begin
 

@@ -1,5 +1,6 @@
-using Base.Test
+using Test
 using QuantumOptics
+using LinearAlgebra
 
 @testset "steadystate" begin
 
@@ -27,13 +28,13 @@ Ha = embed(basis, 1, 0.5*ωa*sz)
 Hc = embed(basis, 2, ωc*number(fockbasis))
 Hint = sm ⊗ create(fockbasis) + sp ⊗ destroy(fockbasis)
 H = Ha + Hc + Hint
-Hdense = full(H)
+Hdense = dense(H)
 
 Ja = embed(basis, 1, sqrt(γ)*sm)
 Ja2 = embed(basis, 1, sqrt(0.5*γ)*sp)
 Jc = embed(basis, 2, sqrt(κ)*destroy(fockbasis))
 J = [Ja, Jc]
-Jdense = map(full, J)
+Jdense = map(dense, J)
 
 Ψ₀ = spinup(spinbasis) ⊗ fockstate(fockbasis, 2)
 ρ₀ = dm(Ψ₀)
@@ -64,11 +65,11 @@ tss, ρss = steadystate.master(Hdense, Jdense; tol=1e-4)
 
 ev, ops = steadystate.liouvillianspectrum(Hdense, Jdense)
 @test tracedistance(ρss, ops[1]) < 1e-12
-@test ev[sortperm(-real(ev))] == ev
+@test ev[sortperm(abs.(ev))] == ev
 
 ev, ops = steadystate.liouvillianspectrum(H, sqrt(2).*J; rates=0.5.*ones(length(J)), nev = 1)
-@test tracedistance(ρss, ops[1]) < 1e-12
-@test ev[sortperm(-real(ev))] == ev
+@test tracedistance(ρss, ops[1]/tr(ops[1])) < 1e-12
+@test ev[sortperm(abs.(ev))] == ev
 
 # Compute steady-state photon number of a driven cavity (analytically: η^2/κ^2)
 Hp = η*(destroy(fockbasis) + create(fockbasis))
@@ -83,7 +84,7 @@ nss = expect(create(fockbasis)*destroy(fockbasis), ρss[end])
 nss = expect(create(fockbasis)*destroy(fockbasis), ρss)
 @test n_an - real(nss) < 1e-3
 
-ρss = steadystate.eigenvector(full(Hp), map(full, Jp))
+ρss = steadystate.eigenvector(dense(Hp), map(dense, Jp))
 nss = expect(create(fockbasis)*destroy(fockbasis), ρss)
 @test n_an - real(nss) < 1e-3
 

@@ -1,12 +1,3 @@
-module timeevolution_schroedinger
-
-export schroedinger, schroedinger_dynamic
-
-import ..integrate, ..recast!
-
-using ...bases, ...states, ...operators
-
-
 """
     timeevolution.schroedinger(tspan, psi0, H; fout)
 
@@ -21,11 +12,10 @@ Integrate Schroedinger equation.
         normalized nor permanent! It is still in use by the ode solver and
         therefore must not be changed.
 """
-function schroedinger(tspan, psi0::T, H::Operator;
-                fout::Union{Function,Void}=nothing,
-                kwargs...) where T<:StateVector
+function schroedinger(tspan, psi0::T, H::AbstractOperator{B,B};
+                fout::Union{Function,Nothing}=nothing,
+                kwargs...) where {B<:Basis,T<:StateVector{B}}
     tspan_ = convert(Vector{Float64}, tspan)
-    check_schroedinger(psi0, H)
     dschroedinger_(t::Float64, psi::T, dpsi::T) = dschroedinger(psi, H, dpsi)
     x0 = psi0.data
     state = T(psi0.basis, psi0.data)
@@ -49,7 +39,7 @@ Integrate time-dependent Schroedinger equation.
         therefore must not be changed.
 """
 function schroedinger_dynamic(tspan, psi0::T, f::Function;
-                fout::Union{Function,Void}=nothing,
+                fout::Union{Function,Nothing}=nothing,
                 kwargs...) where T<:StateVector
     tspan_ = convert(Vector{Float64}, tspan)
     dschroedinger_(t::Float64, psi::T, dpsi::T) = dschroedinger_dynamic(t, psi, f, dpsi)
@@ -60,36 +50,33 @@ function schroedinger_dynamic(tspan, psi0::T, f::Function;
 end
 
 
-recast!(x::Vector{Complex128}, psi::StateVector) = (psi.data = x);
-recast!(psi::StateVector, x::Vector{Complex128}) = nothing
+recast!(x::D, psi::StateVector{B,D}) where {B<:Basis, D<:Vector{ComplexF64}} = (psi.data = x);
+recast!(psi::StateVector{B,D}, x::D) where {B<:Basis, D<:Vector{ComplexF64}} = nothing
 
 
-function dschroedinger(psi::Ket, H::Operator, dpsi::Ket)
-    operators.gemv!(complex(0,-1.), H, psi, complex(0.), dpsi)
+function dschroedinger(psi::Ket{B}, H::AbstractOperator{B,B}, dpsi::Ket{B}) where B<:Basis
+    QuantumOpticsBase.gemv!(complex(0,-1.), H, psi, complex(0.), dpsi)
     return dpsi
 end
 
-function dschroedinger(psi::Bra, H::Operator, dpsi::Bra)
-    operators.gemv!(complex(0,1.), psi, H, complex(0.), dpsi)
+function dschroedinger(psi::Bra{B}, H::AbstractOperator{B,B}, dpsi::Bra{B}) where B<:Basis
+    QuantumOpticsBase.gemv!(complex(0,1.), psi, H, complex(0.), dpsi)
     return dpsi
 end
 
 
 function dschroedinger_dynamic(t::Float64, psi0::T, f::Function, dpsi::T) where T<:StateVector
     H = f(t, psi0)
-    check_schroedinger(psi0, H)
     dschroedinger(psi0, H, dpsi)
 end
 
 
-function check_schroedinger(psi::Ket, H::Operator)
+function check_schroedinger(psi::Ket, H::AbstractOperator)
     check_multiplicable(H, psi)
     check_samebases(H)
 end
 
-function check_schroedinger(psi::Bra, H::Operator)
+function check_schroedinger(psi::Bra, H::AbstractOperator)
     check_multiplicable(psi, H)
     check_samebases(H)
-end
-
 end

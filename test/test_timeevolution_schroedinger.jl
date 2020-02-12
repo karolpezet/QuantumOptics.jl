@@ -1,4 +1,4 @@
-using Base.Test
+using Test
 using QuantumOptics
 
 @testset "schroedinger" begin
@@ -51,14 +51,15 @@ end
 tout, psi_rot_t = timeevolution.schroedinger(T, psi0, Hrot)
 tout, psi_t = timeevolution.schroedinger_dynamic(T, psi0, f)
 
+n_op = dense(at*a)
 for (i, t) in enumerate(tout)
-    R = prod([embed(basis, i, expm(1im*ω[i]*t*full(at*a))) for i=1:N])
+    R = prod([embed(basis, i, exp(1im*ω[i]*t*n_op)) for i=1:N])
     psi_rot = psi_rot_t[i]
     psi = psi_t[i]
     # @test abs(dagger(psi_rot)*R*psi) < 1e-5
     rho = dm(psi)
     rho_rot = dm(psi_rot)
-    @test tracedistance(rho_rot, full(R)*rho*dagger(full(R))) < 1e-5
+    @test tracedistance(rho_rot, dense(R)*rho*dagger(dense(R))) < 1e-5
 end
 
 function fout(t, psi)
